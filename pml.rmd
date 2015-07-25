@@ -1,0 +1,274 @@
+---
+title: "Practical Machine Learning"
+author: "Doug Oliver"
+date: "July 22, 2015"
+output: html_document
+---
+
+
+###Overview
+It is now possible to collect a large amount of data about personal activity relatively inexpensively by using devices such as Jawbone Up, Nike FuelBand, and Fitbit. These type of devices are part of the quantified self-movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behaviour, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  (2)      
+
+The paper(1) tells us that participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.  Class A  corresponds  to  the  specified  execution  of  the  exercise, while  the  other  4  classes  correspond  to  common  mistakes.  More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+'Participants were supervised by an experienced weight lifter to  make  sure  the  execution  complied  to  the  manner  they were supposed to simulate.  The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner.' (1)    
+
+The investigation is based on the Weight Lifting Exercise Dataset from http://groupware.les.inf.puc-rio.br/har.  Due acknowledgement is given and the reference is shown in References(1).
+
+
+###The Requirements   
+The goal is to use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Any of the other variables may be used to predict with. A report should be created describing how the model was built, how cross validation was used, what the expected out of sample error is, and why the choices were made. The prediction model is to be used to predict the 20 different test cases.(2)    
+
+###Initialisation     
+
+```{r global_options, include=FALSE, echo=FALSE, results=FALSE}
+knitr::opts_chunk$set( fig.path='Figs/',
+                      echo=TRUE, cache=T, warning=FALSE, message=FALSE)
+``` 
+The datasets can be downloaded from these links:    
+
+https:\\d396qusza40orc.cloudfront.net\predmachlearn\pml-training.csv    
+
+https:\\d396qusza40orc.cloudfront.net\predmachlearn\pml-testing.csv
+ 
+
+
+```{r, echo=TRUE}
+#loading data and required packages
+test <- read.csv("~/R/ml/pml-testing.csv", stringsAsFactors=FALSE)
+training <- read.csv("~/R/ml/pml-training.csv",  na.strings=c("", "NA", "NULL"))
+library(caret)
+library(randomForest)
+library(gbm)
+library(e1071)
+set.seed(3234)
+```   
+Parallel processing will be enabled with:
+```{r}
+library(doParallel)
+registerDoParallel(cores=4)
+```    
+    
+    
+###Data Preparations    
+
+We first look at the size and shape of the data.
+
+```{r, results='hide'}
+View(training)
+summary(training)
+head(training)
+str(training)
+```   
+
+```{r}
+dim(training)
+dim(test)
+```     
+We can see that the number of columns is the same for both data sets.  By comparing
+```{r, results='hide'}
+names(training)==names(test)
+```
+We can observe that all column headings are the same except the last, where in the test set the classe has been replaced with problem_id.  
+
+We now consider the issue of missing variables.
+
+```{r}
+sum(is.na(training))/(19622*160)*100
+sum(is.na(test))/(20*160)*100
+
+```   
+
+There are a lot of N/A's in both datasets, just over 60%.  From a brief review of the training dataset, we can see that many of the columns have no values.  It therefore seems unlikely that they can assist in the prediction, we will therefore remove them from the datasets which will make the training easier and will not affect the quality.  To avoid potential problems we will specify that it is only columns where the N/A's are greater than 75% are to be removed.
+```{r}
+training<-training[, colSums(is.na(training)) < nrow(training) * 0.75]
+test<-test[, colSums(is.na(test)) < nrow(test) * 0.75]
+
+```    
+This reduces the sizes of the datasets to:
+```{r}
+dim(training)
+dim(test)
+```    
+By re-running the names check, we see that all columns match except the last.  This has in fact removed all of the N/A values from both datasets.    
+
+
+
+Looking at the variables, all but the first seven and the last are the measurements taken.  We are predicting for the last variable, so the question is which (if any) of the first seven variables can be removed.  The X column is simply a row number, this can be removed, user_name identifies the participants, as the actions were directed and marked accordingly, this will have no predictive value and can be removed, the three columns referring to timestamp relate to the calculation of when the activities were done, these can be removed.  New window is a Boolean, yes/no, and can be removed.  The paper(1) states that a moving window approach was used and implies that different results were observed for different window sizes.  It is not clear what the numbers mean, however we will leave the column in place.
+
+```{r}
+training<- training[,-(1:6)]
+test<- test[,-(1:6)]
+```    
+
+There are also no near zero covariates.    
+
+```{r}
+nearZeroVar(training)
+nearZeroVar(test)    
+```     
+
+
+
+
+###Cross Validation  
+Consideration was given as to whether to use a k-fold or hold-out method.  In testing the k-fold produced slightly more optimistic results, we will therefore use the more pessimistic hold-out method.   
+
+The training set will be split into two portions in the ratio 75/25 so that we can train on the larger portion, test on the smaller and select the best performing model.  The actual test set is reserved and the best model run against it.
+
+```{r}
+x<- createDataPartition(training$classe, p=0.75, list=F)
+tr_train<-training[x,]
+te_train<- training[-x,]  
+```    
+
+
+###Pre Processing  
+
+A test model is run to form a view if the predictor variables can be reduced.   
+
+```{r}
+modfit<- randomForest(classe ~., data=tr_train, ntree=100, importance=TRUE)
+varImpPlot(modfit)
+#plot(modfit)
+```    
+This would seem to suggest that most of the variance is explained in about the first 10 variables, we will therefore include preProcess='pca', where appropriate.
+This is confirmed by a review with a Generalized Boosted Regression Model (gbm).   
+
+```{r}
+modfit1<- gbm(classe ~., n.tree=5000, data=tr_train)
+summary(modfit1)
+```   
+Where it can be observed that all of the variation is described by 22 variables and about 95% by 9.
+
+###Model Selection    
+
+5 different models will be considered(3):    
+
+1. Random Forests
+2. Recursive Partitioning and Regression Trees (rpart)
+3. A Linear Discriminant Analysis (lda)
+4. A Support Vector Machine (svm)
+5. A Neural Network (nnet)
+
+####1. Random Forest  
+In the caret package the method='rf' runs very slowly on my pc random forest will therefore be run directly.   
+
+```{r}
+modfit<- randomForest(classe ~., data=tr_train, ntree=100, preProcess='pca', importance=TRUE)
+modfit
+plot(modfit)
+```   
+
+
+The plot suggests that the fit is stable by about 40 trees, however as the model runs fairly quickly we will leave ntree at 100.  The oob estimate has degraded from 0.27% to 0.29%, so the results after pre-processing are nearly identical.  A high accuracy rate of about 99.7%.
+
+Estimating the oob error from the te_train data.
+```{r}
+ans<-predict(modfit, te_train[,1:53], type='class')
+cm<-confusionMatrix(te_train$classe, ans)
+#(1-(sum(diag(cm))/sum(as.matrix(cm))))*100
+```    
+This suggests an error rate of  0.2446982%, which confirms the tr_training estimate.    
+\newline    
+
+
+####2. Recursive Partitioning and Regression Trees 
+```{r}
+modfit2<- train(classe ~., method='rpart',preProcess='pca', data=tr_train)
+modfit2$results
+#plot(modfit2)
+```  
+
+This suggests an error rate of 63.77%. (Accuracy 36.23%).   
+
+Estimating the oob error from the te_train data.
+```{r}
+ans2<-predict(modfit2, te_train[,1:53])
+cm2<-confusionMatrix(ans2, te_train$classe)
+#(1-(sum(diag(cm2))/sum(as.vector(cm2))))*100
+```  
+This suggests an error rate of  70.47%.
+It seems also to have missed any predictions for B and C.  This model can be discarded.   
+\newline    
+
+
+####3. A Linear Discriminant Analysis Model
+  
+```{r}
+modfit3<- train(classe ~., method='lda', data=tr_train, preProcess='pca')
+modfit3$results
+#plot(modfit3)
+```   
+This suggests an error rate of 46.25% (Accuracy 53.75%), slightly better than a coin flip.  
+\newline   
+
+
+Estimating the oob error from the te_train data.
+```{r}
+ans3<-predict(modfit3, te_train[,-54])
+cm3<-confusionMatrix(ans3, te_train$classe)
+#(1-(sum(diag(cm3))/sum(as.vector(cm3))))*100
+```  
+This suggests an error rate of  47.61%, slightly worse than the training set error.  This model can be discarded.    
+/newline    
+
+
+####4. A Support Vector Machine    
+
+```{r}
+modfit4<- svm(classe ~., data=tr_train, trControl=tc, preProcess='pca')
+modfit4
+#plot(modfit4)
+```    
+
+Estimating the oob error from the te_train data.
+
+```{r}
+ans4<-predict(modfit4, te_train[,-54])
+cm4<-confusionMatrix(ans4, te_train$classe)
+#(1-(sum(diag(cm4))/sum(as.vector(cm4))))*100
+```    
+This shows an error rate of 5.44% so is worth considering.    
+\newline     
+
+
+####5. A Neural Network 
+```{r, results='hide'}
+modfit5<- train(classe ~., method='nnet', data=tr_train, preProcess='pca', verbose=FALSE)
+modfit5$results
+#plot(modfit5)
+```  
+This suggests an error rate of 39.68% (Accuracy 60.32%).    
+
+Estimating the oob error from the te_train data.
+
+```{r}
+ans5<-predict(modfit5, te_train[,-54])
+cm5<-confusionMatrix(ans5, te_train$classe)
+#(1-(sum(diag(cm5))/sum(as.vector(cm5))))*100
+``` 
+The te_train sample gives a slightly worse estimate of 42.43%.  This model can be discarded.     
+\newline    
+
+
+####Conclusions    
+
+It is worth reviewing Random Forests and SVM to see how they perform in predicting against the test set.
+
+```{r}
+ans6<- predict(modfit, test)
+ans7<- predict(modfit4, test)
+ans6
+ans7
+```    
+
+I will submit the answers produced by Random Forests because of its greater accuracy, stability and speed, however SVM performed creditably producing identical results.   
+
+
+
+####References       
+1. Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+2. Practical Machine Learning - Write up requirements. https://class.coursera.org/predmachlearn-030/human_grading/view/courses/975199/assessments/4/submissions    
+3. https://cran.r-project.org/web/views/MachineLearning.html
+
+
