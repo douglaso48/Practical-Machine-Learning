@@ -40,7 +40,6 @@ library(caret)
 library(randomForest)
 library(gbm)
 library(e1071)
-set.seed(3234)
 ```   
 Parallel processing will be enabled with:
 ```{r}
@@ -127,18 +126,21 @@ te_train<- training[-x,]
 A test model is run to form a view if the predictor variables can be reduced.   
 
 ```{r}
+set.seed(3234)
 modfit<- randomForest(classe ~., data=tr_train, ntree=100, importance=TRUE)
 varImpPlot(modfit)
-#plot(modfit)
-```    
+```        
+
+
 This would seem to suggest that most of the variance is explained in about the first 10 variables, we will therefore include preProcess='pca', where appropriate.
 This is confirmed by a review with a Generalized Boosted Regression Model (gbm).   
 
 ```{r}
+set.seed(3234)
 modfit1<- gbm(classe ~., n.tree=5000, data=tr_train)
 summary(modfit1)
 ```   
-Where it can be observed that all of the variation is described by 22 variables and about 95% by 9.
+Where it can be observed that all of the variation is described by 22 variables and about 95% by 10.
 
 ###Model Selection    
 
@@ -154,52 +156,52 @@ Where it can be observed that all of the variation is described by 22 variables 
 In the caret package the method='rf' runs very slowly on my pc random forest will therefore be run directly.   
 
 ```{r}
+set.seed(3234)
 modfit<- randomForest(classe ~., data=tr_train, ntree=100, preProcess='pca', importance=TRUE)
 modfit
 plot(modfit)
 ```   
 
 
-The plot suggests that the fit is stable by about 40 trees, however as the model runs fairly quickly we will leave ntree at 100.  The oob estimate has degraded from 0.27% to 0.29%, so the results after pre-processing are nearly identical.  A high accuracy rate of about 99.7%.
+The plot suggests that the fit is stable by about 40 trees, however as the model runs fairly quickly we will leave ntree at 100.  The oob error estimate rate are identical.  A high accuracy rate of about 99.7%.
 
 Estimating the oob error from the te_train data.
 ```{r}
 ans<-predict(modfit, te_train[,1:53], type='class')
 cm<-confusionMatrix(te_train$classe, ans)
-#(1-(sum(diag(cm))/sum(as.matrix(cm))))*100
+(1-sum(ans==te_train$classe)/length(te_train$classe))*100
 ```    
-This suggests an error rate of  0.2446982%, which confirms the tr_training estimate.    
+The error rate is a little better than the tr_train estimate.    
 \newline    
 
 
-####2. Recursive Partitioning and Regression Trees 
+####2. Recursive Partitioning and Regression Trees    
+
 ```{r}
+set.seed(3234)
 modfit2<- train(classe ~., method='rpart',preProcess='pca', data=tr_train)
 modfit2$results
-#plot(modfit2)
 ```  
-
-This suggests an error rate of 63.77%. (Accuracy 36.23%).   
 
 Estimating the oob error from the te_train data.
 ```{r}
 ans2<-predict(modfit2, te_train[,1:53])
 cm2<-confusionMatrix(ans2, te_train$classe)
-#(1-(sum(diag(cm2))/sum(as.vector(cm2))))*100
+(1-sum(ans2==te_train$classe)/length(te_train$classe))*100
 ```  
-This suggests an error rate of  70.47%.
-It seems also to have missed any predictions for B and C.  This model can be discarded.   
+This suggests an error rate of  62.13%.
+It seems also to have missed any predictions for C and D.  This model can be discarded.   
 \newline    
 
 
 ####3. A Linear Discriminant Analysis Model
   
 ```{r}
+set.seed(3234)
 modfit3<- train(classe ~., method='lda', data=tr_train, preProcess='pca')
 modfit3$results
-#plot(modfit3)
 ```   
-This suggests an error rate of 46.25% (Accuracy 53.75%), slightly better than a coin flip.  
+This suggests an error rate of 46.14% (Accuracy 53.86%), slightly better than a coin flip.  
 \newline   
 
 
@@ -207,18 +209,18 @@ Estimating the oob error from the te_train data.
 ```{r}
 ans3<-predict(modfit3, te_train[,-54])
 cm3<-confusionMatrix(ans3, te_train$classe)
-#(1-(sum(diag(cm3))/sum(as.vector(cm3))))*100
+(1-sum(ans3==te_train$classe)/length(te_train$classe))*100
 ```  
-This suggests an error rate of  47.61%, slightly worse than the training set error.  This model can be discarded.    
-/newline    
+This suggests an error rate of  46.04%, about the same as the training set error estimate.  This model can be discarded.    
+\newline    
 
 
 ####4. A Support Vector Machine    
 
 ```{r}
+set.seed(3234)
 modfit4<- svm(classe ~., data=tr_train, trControl=tc, preProcess='pca')
 modfit4
-#plot(modfit4)
 ```    
 
 Estimating the oob error from the te_train data.
@@ -226,28 +228,33 @@ Estimating the oob error from the te_train data.
 ```{r}
 ans4<-predict(modfit4, te_train[,-54])
 cm4<-confusionMatrix(ans4, te_train$classe)
-#(1-(sum(diag(cm4))/sum(as.vector(cm4))))*100
+(1-sum(ans4==te_train$classe)/length(te_train$classe))*100
 ```    
-This shows an error rate of 5.44% so is worth considering.    
+This shows an error rate of 4.10% so is well worth considering.    
 \newline     
 
 
 ####5. A Neural Network 
 ```{r, results='hide'}
+set.seed(3234)
 modfit5<- train(classe ~., method='nnet', data=tr_train, preProcess='pca', verbose=FALSE)
+```    
+
+```{r}
 modfit5$results
-#plot(modfit5)
-```  
-This suggests an error rate of 39.68% (Accuracy 60.32%).    
+```     
+
+This suggests an error rate of 39.54% (Accuracy 60.46%).    
 
 Estimating the oob error from the te_train data.
 
 ```{r}
 ans5<-predict(modfit5, te_train[,-54])
 cm5<-confusionMatrix(ans5, te_train$classe)
-#(1-(sum(diag(cm5))/sum(as.vector(cm5))))*100
+(1-sum(ans5==te_train$classe)/length(te_train$classe))*100
+
 ``` 
-The te_train sample gives a slightly worse estimate of 42.43%.  This model can be discarded.     
+The te_train sample gives a slightly better estimate of 36.70%.  This model can be discarded.     
 \newline    
 
 
@@ -262,7 +269,7 @@ ans6
 ans7
 ```    
 
-I will submit the answers produced by Random Forests because of its greater accuracy, stability and speed, however SVM performed creditably producing identical results.   
+I will submit the answers produced by Random Forests because of its greater accuracy, stability and speed, however SVM performed creditably producing identical results on most runs, but on others row 3 was shown as A rather than B.   
 
 
 
